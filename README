@@ -11,3 +11,13 @@ To run this application, you must have a Sender ID
 and a GCM server. For details, see:
 
 http://developer.android.com/google/gcm/gs.html
+
+--- curl cheat sheet
+curl -k -X POST --data 'username=noj&new-password=foobar&verify-password=foobar' https://localhost:8431/register
+curl -k -X POST --data 'username=jon&new-password=foobar&verify-password=foobar' https://localhost:8431/register
+
+curl -k -X POST --data 'regid=bar' --user jon:foobar https://localhost:8431/register-id
+
+curl -k -X POST --data 'pair-username=jon' --user noj:foobar https://localhost:8431/pair
+
+curl -k -X POST --data 'url=http://www.google.fr' --user noj:foobar https://localhost:8431/send
