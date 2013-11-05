@@ -26,23 +26,36 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 
 import java.io.IOException;
+import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.http.HttpResponse;
+import org.apache.http.HttpVersion;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.scheme.PlainSocketFactory;
+import org.apache.http.conn.scheme.Scheme;
+import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpParams;
+import org.apache.http.params.HttpProtocolParams;
+import org.apache.http.protocol.HTTP;
 
 /**
  * Main UI for the demo app.
@@ -230,9 +243,11 @@ public class DemoActivity extends Activity {
     }
     
     private void SendToBackendInBackground() {
+        Log.v(TAG, "Before AsyncTask");
         new AsyncTask<Void, Void, String>() {
             @Override
             protected String doInBackground(Void... params) {
+                Log.v(TAG, "In AsyncTask");
                 String msg = "";
                 // You should send the registration ID to your server over HTTP, so it
                 // can use GCM/HTTP or CCS to send messages to your app.
@@ -275,6 +290,9 @@ public class DemoActivity extends Activity {
         return getSharedPreferences(DemoActivity.class.getSimpleName(),
                 Context.MODE_PRIVATE);
     }
+    
+    String YOUR_USERNAME = "kop";
+    String YOUR_PASSWORD = "foobar";
     /**
      * Sends the registration ID to your server over HTTP, so it can use GCM/HTTP or CCS to send
      * messages to your app. Not needed for this demo since the device sends upstream messages
@@ -284,8 +302,11 @@ public class DemoActivity extends Activity {
             Log.v(TAG, "Sending regid "+ regid +" to backend");
 
             // Create a new HttpClient and Post Header
-            HttpClient httpclient = new DefaultHttpClient();
-            HttpPost httppost = new HttpPost("http://le-simplex.mooo.com:8080/register");
+            HttpClient httpclient = getNewHttpClient();
+            HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/register-id");
+            String credentials = YOUR_USERNAME + ":" + YOUR_PASSWORD;
+            String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
+            httppost.addHeader("Authorization", "Basic " + base64EncodedCredentials);
 
             try {
                 // Add your data
@@ -307,4 +328,28 @@ public class DemoActivity extends Activity {
                 // TODO Auto-generated catch block
             }
      }
+    
+    private HttpClient getNewHttpClient() {
+        try {
+            KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            trustStore.load(null, null);
+
+            SSLSocketFactory sf = new MySSLSocketFactory(trustStore);
+            sf.setHostnameVerifier(SSLSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
+
+            HttpParams params = new BasicHttpParams();
+            HttpProtocolParams.setVersion(params, HttpVersion.HTTP_1_1);
+            HttpProtocolParams.setContentCharset(params, HTTP.UTF_8);
+
+            SchemeRegistry registry = new SchemeRegistry();
+            registry.register(new Scheme("http", PlainSocketFactory.getSocketFactory(), 8080));
+            registry.register(new Scheme("https", sf, 8431));
+
+            ClientConnectionManager ccm = new ThreadSafeClientConnManager(params, registry);
+
+            return new DefaultHttpClient(ccm, params);
+        } catch (Exception e) {
+            return new DefaultHttpClient();
+        }
+    }
 }
