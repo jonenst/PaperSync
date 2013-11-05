@@ -43,6 +43,7 @@ import org.apache.http.protocol.HTTP;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
@@ -85,9 +86,22 @@ public class DemoActivity extends Activity {
 
     String regid;
 
+    void handleSendText(Intent intent) {
+        String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (sharedText != null) {
+            Log.v(TAG, "Got text: " + sharedText);
+            SendImageInBackground(sharedText);
+        }
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Get intent, action and MIME type
+        Intent intent = getIntent();
+        String action = intent.getAction();
+        String type = intent.getType();
 
         setContentView(R.layout.main);
         mDisplay = (TextView) findViewById(R.id.display);
@@ -95,7 +109,12 @@ public class DemoActivity extends Activity {
         context = getApplicationContext();
 
         // Check device for Play Services APK. If check succeeds, proceed with GCM registration.
-        if (checkPlayServices()) {
+
+        if (Intent.ACTION_SEND.equals(action) && type != null) {
+            if ("text/plain".equals(type)) {
+                handleSendText(intent); // Handle text being sent
+            }
+        } else if (checkPlayServices()) {
             gcm = GoogleCloudMessaging.getInstance(this);
             regid = getRegistrationId(context);
             Log.v(TAG, "Got regid" + regid);
@@ -261,6 +280,26 @@ public class DemoActivity extends Activity {
         }.execute(null, null, null);
     }
 
+    private void SendImageInBackground(final String url) {
+        Log.v(TAG, "Before AsyncTask");
+        new AsyncTask<Void, Void, String>() {
+            @Override
+            protected String doInBackground(Void... params) {
+                Log.v(TAG, "In AsyncTask");
+                String msg = "";
+                // You should send the registration ID to your server over HTTP, so it
+                // can use GCM/HTTP or CCS to send messages to your app.
+                sendImageToBackend(url);
+                return msg;
+            }
+
+            @Override
+            protected void onPostExecute(String msg) {
+                mDisplay.append(msg + "\n");
+            }
+        }.execute(null, null, null);
+    }
+    
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -327,7 +366,36 @@ public class DemoActivity extends Activity {
                 // TODO Auto-generated catch block
             }
      }
-    
+
+    private void sendImageToBackend(String url) {
+        Log.v(TAG, "Sending url "+ url +" to backend");
+
+        // Create a new HttpClient and Post Header
+        HttpClient httpclient = getNewHttpClient();
+        HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/send");
+        String credentials = YOUR_USERNAME + ":" + YOUR_PASSWORD;
+        String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
+        httppost.addHeader("Authorization", "Basic " + base64EncodedCredentials);
+
+        try {
+            // Add your data
+            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
+            nameValuePairs.add(new BasicNameValuePair("url", url));
+            httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+
+            // Execute HTTP Post Request
+            Log.v(TAG, "Send image to le-simplex.moo.com");
+            HttpResponse response = httpclient.execute(httppost);
+            Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
+
+        } catch (ClientProtocolException e) {
+            // TODO Auto-generated catch block
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+        }
+    }
+
+        
     private HttpClient getNewHttpClient() {
         try {
             KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
