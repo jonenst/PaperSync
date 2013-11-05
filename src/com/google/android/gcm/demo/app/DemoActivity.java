@@ -290,7 +290,7 @@ public class DemoActivity extends Activity {
                 Context.MODE_PRIVATE);
     }
     
-    String YOUR_USERNAME = "kop";
+    String YOUR_USERNAME = "jon";
     String YOUR_PASSWORD = "foobar";
     /**
      * Sends the registration ID to your server over HTTP, so it can use GCM/HTTP or CCS to send
