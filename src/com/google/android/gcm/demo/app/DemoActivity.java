@@ -27,6 +27,8 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpOptions;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ClientConnectionManager;
 import org.apache.http.conn.scheme.PlainSocketFactory;
@@ -51,7 +53,12 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.util.Base64;
 import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
@@ -62,10 +69,12 @@ import com.google.android.gms.gcm.GoogleCloudMessaging;
  */
 public class DemoActivity extends Activity {
 
-    public static final String EXTRA_MESSAGE = "message";
     public static final String PROPERTY_REG_ID = "registration_id";
     private static final String PROPERTY_APP_VERSION = "appVersion";
     private static final String PROPERTY_BACKEND_ACK = "backendAck";
+    private static final String PROPERTY_BACKEND_ACK_USER = "backendAckUser";
+    private static final String PROPERTY_USERNAME = "username";
+    private static final String PROPERTY_PASSWORD = "password";
     private static final int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
 
     /**
@@ -79,9 +88,7 @@ public class DemoActivity extends Activity {
      */
     static final String TAG = "jon";
 
-    TextView mDisplay;
     GoogleCloudMessaging gcm;
-    AtomicInteger msgId = new AtomicInteger();
     Context context;
 
     String regid;
@@ -104,12 +111,33 @@ public class DemoActivity extends Activity {
         String type = intent.getType();
 
         setContentView(R.layout.main);
-        mDisplay = (TextView) findViewById(R.id.display);
 
         context = getApplicationContext();
 
-        // Check device for Play Services APK. If check succeeds, proceed with GCM registration.
+        final Button register = (Button) findViewById(R.id.register_button);
+        final EditText username = (EditText) findViewById(R.id.username_field);
+        final EditText password = (EditText) findViewById(R.id.password_field);
+        final EditText verifypassword = (EditText) findViewById(R.id.password_repeat_field);
+        register.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                RegisterInBackground(username.getText().toString(),
+                        password.getText().toString(),
+                        verifypassword.getText().toString());
+            }
+        });
+        final Button check = (Button) findViewById(R.id.check_button);
+        check.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                CheckInBackground(username.getText().toString(),
+                        password.getText().toString());
+            }
+        });
 
+        setCurrentUser(getUser());
+
+        // Check device for Play Services APK. If check succeeds, proceed with GCM registration.
         if (Intent.ACTION_SEND.equals(action) && type != null) {
             if ("text/plain".equals(type)) {
                 handleSendText(intent); // Handle text being sent
@@ -135,7 +163,14 @@ public class DemoActivity extends Activity {
         // Check device for Play Services APK.
         checkPlayServices();
     }
-
+    private void setCurrentUser(String username) {
+        TextView tv = (TextView) findViewById(R.id.current_user);
+        if (!username.isEmpty()) {
+            tv.setText("current user : " + username); //FIXME i18n
+        } else {
+            tv.setText("no valid user"); //FIXME i18n
+        }
+    }
     /**
      * Check the device to make sure it has the Google Play Services APK. If
      * it doesn't, display a dialog that allows users to download the APK from
@@ -180,6 +215,15 @@ public class DemoActivity extends Activity {
         editor.commit();
     }
 
+    private void storeUserCredentials(DemoActivity demoActivity,
+            String username, String password) {
+        final SharedPreferences prefs = getGcmPreferences(context);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(PROPERTY_USERNAME, username);
+        editor.putString(PROPERTY_PASSWORD, password);
+        editor.commit();
+    }
+
     /**
      * Gets the current registration ID for application on GCM service, if there is one.
      * <p>
@@ -207,12 +251,22 @@ public class DemoActivity extends Activity {
         return registrationId;
     }
 
+    private String getUser() {
+        final SharedPreferences prefs = getGcmPreferences(context);
+        return prefs.getString(PROPERTY_USERNAME, "");
+    }
+    private String getCredentials() {
+        final SharedPreferences prefs = getGcmPreferences(context);
+        return prefs.getString(PROPERTY_USERNAME, "") + ":" + prefs.getString(PROPERTY_PASSWORD, "");
+    }
+
     private String ensureBackendAck(Context context) {
         final SharedPreferences prefs = getGcmPreferences(context);
         String registrationId = prefs.getString(PROPERTY_REG_ID, "");
         String backendAck = prefs.getString(PROPERTY_BACKEND_ACK, "");
-        Log.v(TAG, "Got backendAck: " + backendAck);
-        if (!registrationId.equals(backendAck)) {
+        String backendAckUser = prefs.getString(PROPERTY_BACKEND_ACK_USER, "");
+        Log.v(TAG, "Got backendAck: " + backendAck + ", user: " + backendAckUser);
+        if (!registrationId.equals(backendAck) && !getUser().isEmpty() && !backendAck.equals(getUser())) {
             SendToBackendInBackground();
         }
         return registrationId;
@@ -225,16 +279,14 @@ public class DemoActivity extends Activity {
      * shared preferences.
      */
     private void registerInBackground() {
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, Boolean>() {
             @Override
-            protected String doInBackground(Void... params) {
-                String msg = "";
+            protected Boolean doInBackground(Void... params) {
                 try {
                     if (gcm == null) {
                         gcm = GoogleCloudMessaging.getInstance(context);
                     }
                     regid = gcm.register(SENDER_ID);
-                    msg = "Device registered, registration ID=" + regid;
 
                     // Persist the regID - no need to register again.
                     storeRegistrationId(context, regid);
@@ -245,61 +297,122 @@ public class DemoActivity extends Activity {
 
 
                 } catch (IOException ex) {
-                    msg = "Error :" + ex.getMessage();
-                    // If there is an error, don't just keep trying to register.
-                    // Require the user to click a button again, or perform
-                    // exponential back-off.
+                    return false;
                 }
-                return msg;
+                return true;
             }
 
             @Override
-            protected void onPostExecute(String msg) {
-                mDisplay.append(msg + "\n");
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
             }
         }.execute(null, null, null);
     }
     
     private void SendToBackendInBackground() {
         Log.v(TAG, "Before AsyncTask");
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, Boolean>() {
             @Override
-            protected String doInBackground(Void... params) {
+            protected Boolean doInBackground(Void... params) {
                 Log.v(TAG, "In AsyncTask");
-                String msg = "";
                 // You should send the registration ID to your server over HTTP, so it
                 // can use GCM/HTTP or CCS to send messages to your app.
-                sendRegistrationIdToBackend();
-                return msg;
+                try {
+                    sendRegistrationIdToBackend();
+                } catch (ClientProtocolException e) {
+                    return false;
+                } catch (IOException e) {
+                    return false;
+                }
+                return true;
             }
 
             @Override
-            protected void onPostExecute(String msg) {
-                mDisplay.append(msg + "\n");
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
             }
         }.execute(null, null, null);
     }
 
     private void SendImageInBackground(final String url) {
         Log.v(TAG, "Before AsyncTask");
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, Boolean>() {
             @Override
-            protected String doInBackground(Void... params) {
+            protected Boolean doInBackground(Void... params) {
                 Log.v(TAG, "In AsyncTask");
-                String msg = "";
                 // You should send the registration ID to your server over HTTP, so it
                 // can use GCM/HTTP or CCS to send messages to your app.
-                sendImageToBackend(url);
-                return msg;
+                try {
+                    sendImageToBackend(url);
+                } catch (ClientProtocolException e) {
+                    return false;
+                } catch (IOException e) {
+                    return false;
+                }
+                return true;
             }
 
             @Override
-            protected void onPostExecute(String msg) {
-                mDisplay.append(msg + "\n");
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
             }
         }.execute(null, null, null);
     }
     
+    private void RegisterInBackground (
+            final String username,
+            final String password,
+            final String verifyPassword) {
+        Log.v(TAG, "Before AsyncTask");
+        new AsyncTask<Void, Void, Boolean>() {
+            @Override
+            protected Boolean doInBackground(Void... params) {
+                Log.v(TAG, "In AsyncTask");
+                // You should send the registration ID to your server over HTTP, so it
+                // can use GCM/HTTP or CCS to send messages to your app.
+                try {
+                    return RegisterToBackend(username, password, verifyPassword);
+                } catch (ClientProtocolException e) {
+                } catch (IOException e) {
+                }
+                return false;
+            }
+
+            @Override
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
+                if (b)
+                    setCurrentUser(username);
+            }
+        }.execute(null, null, null);
+    }
+
+    private void CheckInBackground (
+            final String username,
+            final String password) {
+        Log.v(TAG, "Before AsyncTask");
+        new AsyncTask<Void, Void, Boolean>() {
+            @Override
+            protected Boolean doInBackground(Void... params) {
+                Log.v(TAG, "In AsyncTask");
+                try {
+                    return sendCheckToBackend(username, password);
+                } catch (ClientProtocolException e) {
+                } catch (IOException e) {
+                }
+                return false;
+            }
+
+            @Override
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
+                if (b)
+                    setCurrentUser(username);
+            }
+        }.execute(null, null, null);
+    }
+
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -329,73 +442,107 @@ public class DemoActivity extends Activity {
                 Context.MODE_PRIVATE);
     }
     
-    String YOUR_USERNAME = "jon";
-    String YOUR_PASSWORD = "foobar";
     /**
      * Sends the registration ID to your server over HTTP, so it can use GCM/HTTP or CCS to send
      * messages to your app. Not needed for this demo since the device sends upstream messages
      * to a server that echoes back the message using the 'from' address in the message.
      */
-    private void sendRegistrationIdToBackend() {
+    private void sendRegistrationIdToBackend() throws
+    ClientProtocolException, IOException {
             Log.v(TAG, "Sending regid "+ regid +" to backend");
 
             // Create a new HttpClient and Post Header
             HttpClient httpclient = getNewHttpClient();
             HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/register-id");
-            String credentials = YOUR_USERNAME + ":" + YOUR_PASSWORD;
+            String credentials = getCredentials();
             String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
             httppost.addHeader("Authorization", "Basic " + base64EncodedCredentials);
 
-            try {
-                // Add your data
-                List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
-                nameValuePairs.add(new BasicNameValuePair("regid", regid));
-                httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+            // Add your data
+            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
+            nameValuePairs.add(new BasicNameValuePair("regid", regid));
+            httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
 
-                // Execute HTTP Post Request
-                Log.v(TAG, "Send to le-simplex.moo.com");
-                HttpResponse response = httpclient.execute(httppost);
-                Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
-                if (response.getStatusLine().getStatusCode() == 200) {
-                    storeBackendAck(this, regid);
-                }
-
-            } catch (ClientProtocolException e) {
-                // TODO Auto-generated catch block
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
+            // Execute HTTP Post Request
+            Log.v(TAG, "Send to le-simplex.moo.com");
+            HttpResponse response = httpclient.execute(httppost);
+            Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
+            if (response.getStatusLine().getStatusCode() == 200) {
+                storeBackendAck(this, regid);
             }
      }
 
-    private void sendImageToBackend(String url) {
+    private void sendImageToBackend(String url) throws
+    ClientProtocolException, IOException {
         Log.v(TAG, "Sending url "+ url +" to backend");
 
         // Create a new HttpClient and Post Header
         HttpClient httpclient = getNewHttpClient();
         HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/send");
-        String credentials = YOUR_USERNAME + ":" + YOUR_PASSWORD;
+        String credentials = getCredentials();
         String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
         httppost.addHeader("Authorization", "Basic " + base64EncodedCredentials);
 
-        try {
-            // Add your data
-            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
-            nameValuePairs.add(new BasicNameValuePair("url", url));
-            httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+        // Add your data
+        List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
+        nameValuePairs.add(new BasicNameValuePair("url", url));
+        httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
 
-            // Execute HTTP Post Request
-            Log.v(TAG, "Send image to le-simplex.moo.com");
-            HttpResponse response = httpclient.execute(httppost);
-            Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
+        // Execute HTTP Post Request
+        Log.v(TAG, "Send image to le-simplex.moo.com");
+        HttpResponse response = httpclient.execute(httppost);
+        Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
 
-        } catch (ClientProtocolException e) {
-            // TODO Auto-generated catch block
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-        }
     }
 
-        
+    private boolean sendCheckToBackend(String username, String password) throws
+    ClientProtocolException, IOException {
+        Log.v(TAG, "Sending check to backend");
+
+        // Create a new HttpClient and Post Header
+        HttpClient httpclient = getNewHttpClient();
+        HttpGet httpget = new HttpGet("https://le-simplex.mooo.com:8431/check");
+        String credentials = username + ":" + password;
+        String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
+        httpget.addHeader("Authorization", "Basic " + base64EncodedCredentials);
+
+
+        // Execute HTTP Post Request
+        Log.v(TAG, "Send image to le-simplex.moo.com");
+        HttpResponse response = httpclient.execute(httpget);
+        Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
+        if (response.getStatusLine().getStatusCode() == 200) {
+            storeUserCredentials(this, username, password);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean RegisterToBackend(String username, String password, String verifyPassword) throws
+    ClientProtocolException, IOException {
+        Log.v(TAG, "Registering username " + username + " pwd: " + password + ", " + verifyPassword);
+
+        // Create a new HttpClient and Post Header
+        HttpClient httpclient = getNewHttpClient();
+        HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/register");
+
+        // Add your data
+        List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
+        nameValuePairs.add(new BasicNameValuePair("username", username));
+        nameValuePairs.add(new BasicNameValuePair("new-password", password));
+        nameValuePairs.add(new BasicNameValuePair("verify-password", verifyPassword));
+        httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+
+        // Execute HTTP Post Request
+        HttpResponse response = httpclient.execute(httppost);
+        Log.v(TAG, "Got reponse " + response.getStatusLine().toString());
+        if (sendCheckToBackend(username, password)) {
+            sendRegistrationIdToBackend();
+            return true;
+        }
+        return false;
+    }
+
     private HttpClient getNewHttpClient() {
         try {
             KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
