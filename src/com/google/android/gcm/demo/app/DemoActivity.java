@@ -134,6 +134,14 @@ public class DemoActivity extends Activity {
                         password.getText().toString());
             }
         });
+        final EditText pair_username = (EditText) findViewById(R.id.pair_field);
+        final Button pair = (Button) findViewById(R.id.pair_button);
+        pair.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                PairInBackground(pair_username.getText().toString());
+            }
+        });
 
         setCurrentUser(getUser());
 
@@ -150,7 +158,7 @@ public class DemoActivity extends Activity {
             if (regid.isEmpty()) {
                 registerInBackground();
             } else {
-                ensureBackendAck(this);
+                ensureBackendAckinBackground(this);
             }
         } else {
             Log.v(TAG, "No valid Google Play Services APK found.");
@@ -212,6 +220,7 @@ public class DemoActivity extends Activity {
         final SharedPreferences prefs = getGcmPreferences(context);
         SharedPreferences.Editor editor = prefs.edit();
         editor.putString(PROPERTY_BACKEND_ACK, regId);
+        editor.putString(PROPERTY_BACKEND_ACK_USER, getUser());
         editor.commit();
     }
 
@@ -260,16 +269,19 @@ public class DemoActivity extends Activity {
         return prefs.getString(PROPERTY_USERNAME, "") + ":" + prefs.getString(PROPERTY_PASSWORD, "");
     }
 
-    private String ensureBackendAck(Context context) {
+    private boolean needBackendAck(Context context) {
         final SharedPreferences prefs = getGcmPreferences(context);
         String registrationId = prefs.getString(PROPERTY_REG_ID, "");
         String backendAck = prefs.getString(PROPERTY_BACKEND_ACK, "");
         String backendAckUser = prefs.getString(PROPERTY_BACKEND_ACK_USER, "");
         Log.v(TAG, "Got backendAck: " + backendAck + ", user: " + backendAckUser);
-        if (!registrationId.equals(backendAck) && !getUser().isEmpty() && !backendAck.equals(getUser())) {
+        return !getUser().isEmpty() && (!registrationId.equals(backendAck) || !backendAckUser.equals(getUser()));
+    }
+
+    private void ensureBackendAckinBackground(Context context) {
+        if (needBackendAck(context)) {
             SendToBackendInBackground();
         }
-        return registrationId;
     }
 
     /**
@@ -293,13 +305,11 @@ public class DemoActivity extends Activity {
                     
                     // You should send the registration ID to your server over HTTP, so it
                     // can use GCM/HTTP or CCS to send messages to your app.
-                    sendRegistrationIdToBackend();
-
+                    return sendRegistrationIdToBackend();
 
                 } catch (IOException ex) {
-                    return false;
                 }
-                return true;
+                return false;
             }
 
             @Override
@@ -318,13 +328,34 @@ public class DemoActivity extends Activity {
                 // You should send the registration ID to your server over HTTP, so it
                 // can use GCM/HTTP or CCS to send messages to your app.
                 try {
-                    sendRegistrationIdToBackend();
+                    return sendRegistrationIdToBackend();
                 } catch (ClientProtocolException e) {
-                    return false;
                 } catch (IOException e) {
-                    return false;
                 }
-                return true;
+                return false;
+            }
+
+            @Override
+            protected void onPostExecute(Boolean b) {
+                Toast.makeText(context, b ? "Success" : "Fail...", Toast.LENGTH_SHORT).show();
+            }
+        }.execute(null, null, null);
+    }
+
+    private void PairInBackground(final String PairUsername) {
+        Log.v(TAG, "Before AsyncTask");
+        new AsyncTask<Void, Void, Boolean>() {
+            @Override
+            protected Boolean doInBackground(Void... params) {
+                Log.v(TAG, "In AsyncTask");
+                // You should send the registration ID to your server over HTTP, so it
+                // can use GCM/HTTP or CCS to send messages to your app.
+                try {
+                    return sendPairRequestToBackend(PairUsername);
+                } catch (ClientProtocolException e) {
+                } catch (IOException e) {
+                }
+                return false;
             }
 
             @Override
@@ -343,13 +374,11 @@ public class DemoActivity extends Activity {
                 // You should send the registration ID to your server over HTTP, so it
                 // can use GCM/HTTP or CCS to send messages to your app.
                 try {
-                    sendImageToBackend(url);
+                    return sendImageToBackend(url);
                 } catch (ClientProtocolException e) {
-                    return false;
                 } catch (IOException e) {
-                    return false;
                 }
-                return true;
+                return false;
             }
 
             @Override
@@ -447,7 +476,7 @@ public class DemoActivity extends Activity {
      * messages to your app. Not needed for this demo since the device sends upstream messages
      * to a server that echoes back the message using the 'from' address in the message.
      */
-    private void sendRegistrationIdToBackend() throws
+    private boolean sendRegistrationIdToBackend() throws
     ClientProtocolException, IOException {
             Log.v(TAG, "Sending regid "+ regid +" to backend");
 
@@ -469,10 +498,35 @@ public class DemoActivity extends Activity {
             Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
             if (response.getStatusLine().getStatusCode() == 200) {
                 storeBackendAck(this, regid);
+                return true;
             }
+            return false;
+    }
+
+    private boolean sendPairRequestToBackend(String PairUsername) throws
+    ClientProtocolException, IOException {
+            Log.v(TAG, "Sending asking for pairing to  " + PairUsername + " to backend");
+
+            // Create a new HttpClient and Post Header
+            HttpClient httpclient = getNewHttpClient();
+            HttpPost httppost = new HttpPost("https://le-simplex.mooo.com:8431/pair");
+            String credentials = getCredentials();
+            String base64EncodedCredentials = Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
+            httppost.addHeader("Authorization", "Basic " + base64EncodedCredentials);
+
+            // Add your data
+            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>();
+            nameValuePairs.add(new BasicNameValuePair("pair-username", PairUsername));
+            httppost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+
+            // Execute HTTP Post Request
+            Log.v(TAG, "Send to le-simplex.moo.com");
+            HttpResponse response = httpclient.execute(httppost);
+            Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
+            return true;
      }
 
-    private void sendImageToBackend(String url) throws
+    private boolean sendImageToBackend(String url) throws
     ClientProtocolException, IOException {
         Log.v(TAG, "Sending url "+ url +" to backend");
 
@@ -492,7 +546,10 @@ public class DemoActivity extends Activity {
         Log.v(TAG, "Send image to le-simplex.moo.com");
         HttpResponse response = httpclient.execute(httppost);
         Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
-
+        if (response.getStatusLine().getStatusCode() == 200) {
+            return true;
+        }
+        return false;
     }
 
     private boolean sendCheckToBackend(String username, String password) throws
@@ -513,6 +570,9 @@ public class DemoActivity extends Activity {
         Log.v(TAG, "Got reponse status code " + Integer.toString(response.getStatusLine().getStatusCode()));
         if (response.getStatusLine().getStatusCode() == 200) {
             storeUserCredentials(this, username, password);
+            if (needBackendAck(this)) {
+                sendRegistrationIdToBackend();
+            }
             return true;
         }
         return false;
@@ -536,11 +596,7 @@ public class DemoActivity extends Activity {
         // Execute HTTP Post Request
         HttpResponse response = httpclient.execute(httppost);
         Log.v(TAG, "Got reponse " + response.getStatusLine().toString());
-        if (sendCheckToBackend(username, password)) {
-            sendRegistrationIdToBackend();
-            return true;
-        }
-        return false;
+        return sendCheckToBackend(username, password);
     }
 
     private HttpClient getNewHttpClient() {

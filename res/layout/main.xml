@@ -71,4 +71,21 @@
     android:layout_weight="1"
     android:text="@string/register_text" />
 
+<EditText
+    android:id="@+id/pair_field"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:hint="@string/pair_hint"
+    android:inputType="text|textNoSuggestions" >
+
+    </EditText>
+
+<Button
+    android:id="@+id/pair_button"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:text="@string/pair_text" />
+
 </LinearLayout>

@@ -22,5 +22,7 @@
 	<string name="password_repeat_hint">Repeat Password</string>
 	<string name="register_text">Register</string>
 	<string name="check_text">Check</string>
+	<string name="pair_text">Pair with him!</string>
+	<string name="pair_hint">Pair Username</string>
 
 </resources>
